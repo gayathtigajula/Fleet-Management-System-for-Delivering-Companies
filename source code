@@ -1,0 +1,638 @@
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <vector>
+#include <map>
+#include <ctime>
+#include <iomanip>
+#include <memory>
+#include <algorithm>
+
+// Forward declarations
+class User;
+class Vehicle;
+class Shipment;
+class FleetManager;
+
+// Helper functions for file operations
+namespace FileOps {
+    bool fileExists(const std::string& filename) {
+        std::ifstream file(filename);
+        return file.good();
+    }
+
+    void appendToFile(const std::string& filename, const std::string& content) {
+        std::ofstream file(filename, std::ios::app);
+        if (file.is_open()) {
+            file << content << std::endl;
+            file.close();
+        }
+    }
+
+    std::vector<std::string> readLines(const std::string& filename) {
+        std::vector<std::string> lines;
+        std::ifstream file(filename);
+        std::string line;
+        while (std::getline(file, line)) {
+            lines.push_back(line);
+        }
+        return lines;
+    }
+}
+
+// Helper function to convert a string to lowercase
+std::string toLowerCase(const std::string& str) {
+    std::string lowerStr = str;
+    std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), ::tolower);
+    return lowerStr;
+}
+
+// User class for authentication and user management
+class User {
+protected:
+    std::string username;
+    std::string password;
+    std::string role;
+
+public:
+    User(const std::string& uname, const std::string& pwd, const std::string& r)
+        : username(uname), password(pwd), role(r) {}
+
+    virtual ~User() = default;
+
+    bool authenticate(const std::string& pwd) const {
+        return password == pwd;
+    }
+
+    std::string getUsername() const { return username; }
+    std::string getRole() const { return role; }
+
+    virtual void saveToFile() const {
+        std::string content = username + "," + password + "," + role;
+        FileOps::appendToFile("users.txt", content);
+    }
+};
+
+// Derived class for Delivery Agents
+class DeliveryAgent : public User {
+public:
+    DeliveryAgent(const std::string& uname, const std::string& pwd)
+        : User(uname, pwd, "agent") {}
+};
+
+// Derived class for Drivers
+class Driver : public User {
+private:
+    std::string vehicleId;
+    bool available;
+
+public:
+    Driver(const std::string& uname, const std::string& pwd)
+        : User(uname, pwd, "driver"), available(true) {}
+
+    void assignVehicle(const std::string& vId) {
+        vehicleId = vId;
+    }
+
+    std::string getVehicleId() const { return vehicleId; }
+    bool isAvailable() const { return available; }
+    void setAvailability(bool status) { available = status; }
+};
+
+// Derived class for Admin
+class Admin : public User {
+public:
+    Admin() : User("admin", "iamadmin", "admin") {}
+};
+
+// Vehicle class hierarchy
+class Vehicle {
+protected:
+    std::string id;
+    double fuelCapacity;
+    double mileage;
+    double currentFuel;
+    bool available;
+    std::string assignedDriverId;
+
+public:
+    Vehicle(const std::string& vId, double fCap, double mil)
+        : id(vId), fuelCapacity(fCap), mileage(mil), currentFuel(fCap), available(true) {}
+
+    virtual ~Vehicle() = default;
+
+    virtual double getMaxWeight() const = 0;
+    std::string getId() const { return id; }
+    bool isAvailable() const { return available; }
+    void setAvailability(bool status) { available = status; }
+
+    void assignDriver(const std::string& driverId) {
+        assignedDriverId = driverId;
+    }
+
+    std::pair<int, double> calculateFuelNeeds(double distance) {
+        double totalFuelNeeded = distance / mileage;
+        int refills = static_cast<int>(totalFuelNeeded / fuelCapacity);
+        return {refills, totalFuelNeeded};
+    }
+};
+
+class Van : public Vehicle {
+public:
+    Van(const std::string& vId) : Vehicle(vId, 30, 14) {}
+    double getMaxWeight() const override { return 350; }
+};
+
+class Truck : public Vehicle {
+public:
+    Truck(const std::string& vId) : Vehicle(vId, 60, 10) {}
+    double getMaxWeight() const override { return 1000; }
+};
+
+// Shipment class to handle delivery details
+class Shipment {
+private:
+    static int nextId;
+    std::string shipmentId;
+    std::string origin;
+    std::string destination;
+    double totalWeight;
+    std::vector<std::string> itemTypes;
+    std::string status;
+    std::string vehicleId;
+    std::string driverId;
+    double fuelConsumed;
+    double timeTaken;
+
+public:
+    Shipment(const std::string& orig, const std::string& dest, double weight, const std::vector<std::string>& items)
+        : origin(orig), destination(dest), totalWeight(weight), itemTypes(items), status("Created"), fuelConsumed(0), timeTaken(0) {
+        shipmentId = "SHP" + std::to_string(++nextId);
+    }
+
+    // Getters and setters
+    std::string getId() const { return shipmentId; }
+    std::string getOrigin() const { return origin; }
+    std::string getDestination() const { return destination; }
+    double getWeight() const { return totalWeight; }
+    std::string getStatus() const { return status; }
+    void setStatus(const std::string& newStatus) { status = newStatus; }
+    void assignVehicle(const std::string& vId) { vehicleId = vId; }
+    void assignDriver(const std::string& dId) { driverId = dId; }
+    void setFuelAndTime(double fuel, double time) {
+        fuelConsumed = fuel;
+        timeTaken = time;
+    }
+    double getFuelConsumed() const { return fuelConsumed; }
+    double getTimeTaken() const { return timeTaken; }
+
+    void saveToFile() const {
+        std::string content = shipmentId + "," + origin + "," + destination + "," +
+                              std::to_string(totalWeight) + "," + status + "," +
+                              vehicleId + "," + driverId + "," +
+                              std::to_string(fuelConsumed) + "," +
+                              std::to_string(timeTaken);
+        FileOps::appendToFile("shipments.txt", content);
+    }
+
+    void displayStatus() const {
+        std::cout << "\nShipment " << shipmentId << " Status:\n";
+        std::cout << "📦 Created";
+        if (status == "Picked up" || status == "In Transit" || status == "Reached Hub" || status == "Delivered") {
+            std::cout << " ➡ 🚚 Picked up";
+        }
+        if (status == "In Transit" || status == "Reached Hub" || status == "Delivered") {
+            std::cout << " ➡ 🛣 In Transit";
+        }
+        if (status == "Reached Hub" || status == "Delivered") {
+            std::cout << " ➡ 🏢 Reached Hub";
+        }
+        if (status == "Delivered") {
+            std::cout << " ➡ ✅ Delivered";
+        }
+        std::cout << "\n";
+    }
+};
+
+int Shipment::nextId = 0;
+
+// FleetManager class to handle all operations
+class FleetManager {
+private:
+    std::map<std::string, std::map<std::string, int>> cityDistances;
+    std::vector<std::unique_ptr<Vehicle>> vehicles;
+    std::vector<std::unique_ptr<User>> users;
+    std::vector<std::unique_ptr<Shipment>> shipments;
+
+    void initializeCityDistances() {
+cityDistances["delhi"]["mumbai"] = 1440;
+        cityDistances["delhi"]["bengaluru"] = 2150;
+        cityDistances["delhi"]["chennai"] = 2100;
+        cityDistances["delhi"]["kolkata"] = 1500;
+         cityDistances["delhi"]["hyderabad"] = 1700;
+        cityDistances["delhi"]["gandhinagar"] = 950;
+        cityDistances["delhi"]["pune"] = 1470;
+        cityDistances["delhi"]["jaipur"] = 280;
+        cityDistances["delhi"]["lucknow"] = 500;
+        
+        cityDistances["mumbai"]["bengaluru"] = 840;
+        cityDistances["mumbai"]["chennai"] = 1020;
+        cityDistances["mumbai"]["kolkata"] = 1660;
+        cityDistances["mumbai"]["hyderabad"] = 660;
+        cityDistances["mumbai"]["gandhinagar"] = 525;
+        cityDistances["mumbai"]["pune"] = 150;
+        cityDistances["mumbai"]["jaipur"] = 1200;
+        cityDistances["mumbai"]["lucknow"] = 1460;
+        
+        cityDistances["bengaluru"]["chennai"] = 350;
+        cityDistances["bengaluru"]["kolkata"] = 1600;
+        cityDistances["bengaluru"]["hyderabad"] = 570;
+        cityDistances["bengaluru"]["gandhinagar"] = 1350;
+        cityDistances["bengaluru"]["pune"] = 840;
+        cityDistances["bengaluru"]["jaipur"] = 1450;
+        cityDistances["bengaluru"]["lucknow"] = 1600;
+        
+        cityDistances["chennai"]["kolkata"] = 1000;
+        cityDistances["chennai"]["hyderabad"] = 630;
+        cityDistances["chennai"]["gandhinagar"] = 1470;
+
+
+        cityDistances["chennai"]["pune"] = 1020;
+        cityDistances["chennai"]["jaipur"] = 2100;
+        cityDistances["chennai"]["lucknow"] = 1500;
+        
+        cityDistances["kolkata"]["hyderabad"] = 600;
+        cityDistances["kolkata"]["gandhinagar"] = 1150;
+        cityDistances["kolkata"]["pune"] = 1660;
+        cityDistances["kolkata"]["jaipur"] = 1400;
+        cityDistances["kolkata"]["lucknow"] = 500;
+        
+        cityDistances["hyderabad"]["gandhinagar"] = 1450;
+        cityDistances["hyderabad"]["pune"] = 560;
+        cityDistances["hyderabad"]["jaipur"] = 1540;
+        cityDistances["hyderabad"]["lucknow"] = 1050;
+        
+        cityDistances["gandhinagar"]["pune"] = 650;
+        cityDistances["gandhinagar"]["jaipur"] = 900;
+        cityDistances["gandhinagar"]["lucknow"] = 1100;
+        
+        cityDistances["pune"]["jaipur"] = 1200;
+        cityDistances["pune"]["lucknow"] = 1490;
+        
+        cityDistances["jaipur"]["lucknow"] = 550;
+        // Add more city distances as needed...
+    }
+
+    void initializeVehicles() {
+        for (int i = 1; i <= 5; ++i) {
+            vehicles.push_back(std::make_unique<Van>("VAN" + std::to_string(i)));
+            vehicles.push_back(std::make_unique<Truck>("TRK" + std::to_string(i)));
+        }
+    }
+
+public:
+    FleetManager() {
+        initializeCityDistances();
+        initializeVehicles();
+        users.push_back(std::make_unique<Admin>()); // Initialize the admin user
+        loadUsersFromFile();
+        loadShipmentsFromFile();
+    }
+
+    void loadUsersFromFile() {
+        if (!FileOps::fileExists("users.txt")) return;
+        auto lines = FileOps::readLines("users.txt");
+        for (const auto& line : lines) {
+            // Parse and create user objects
+            // Implementation details...
+        }
+    }
+
+    void loadShipmentsFromFile() {
+        if (!FileOps::fileExists("shipments.txt")) return;
+        auto lines = FileOps::readLines("shipments.txt");
+        for (const auto& line : lines) {
+            // Parse and create shipment objects
+            // Implementation details...
+        }
+    }
+
+    bool registerUser(const std::string& username, const std::string& password, const std::string& role) {
+        if (role == "admin") {
+            std::cout << "❌ Registration for admin is not allowed.\n";
+            return false;
+        }
+
+        auto it = std::find_if(users.begin(), users.end(),
+            [&](const auto& user) { return user->getUsername() == username; });
+        if (it != users.end()) return false;
+
+        std::unique_ptr<User> newUser;
+        if (role == "agent")
+            newUser = std::make_unique<DeliveryAgent>(username, password);
+        else if (role == "driver")
+            newUser = std::make_unique<Driver>(username, password);
+        else
+            return false;
+
+        newUser->saveToFile();
+        users.push_back(std::move(newUser));
+        return true;
+    }
+
+    User* login(const std::string& username, const std::string& password) {
+        auto it = std::find_if(users.begin(), users.end(),
+            [&](const auto& user) { return user->getUsername() == username; });
+
+        if (it != users.end() && (*it)->authenticate(password)) {
+            std::string content = username + " logged in at " + std::to_string(std::time(nullptr));
+            FileOps::appendToFile("login_history.txt", content);
+            return it->get();
+        }
+        return nullptr;
+    }
+
+    std::vector<std::string> getCityList() const {
+        std::vector<std::string> cities;
+        for (const auto& pair : cityDistances) {
+            cities.push_back(pair.first);
+        }
+        return cities;
+    }
+
+    int getDistance(const std::string& origin, const std::string& destination) const {
+        std::string lowerOrigin = toLowerCase(origin);
+        std::string lowerDestination = toLowerCase(destination);
+
+        auto it1 = cityDistances.find(lowerOrigin);
+        if (it1 != cityDistances.end()) {
+            auto it2 = it1->second.find(lowerDestination);
+            if (it2 != it1->second.end()) {
+                return it2->second;
+            }
+        }
+        return -1;
+    }
+
+    std::pair<Vehicle*, Driver*> assignVehicle(double weight, int distance) {
+        Vehicle* selectedVehicle = nullptr;
+        for (auto& vehicle : vehicles) {
+            if (vehicle->isAvailable() && vehicle->getMaxWeight() >= weight) {
+                selectedVehicle = vehicle.get();
+                break;
+            }
+        }
+        if (!selectedVehicle) return {nullptr, nullptr};
+
+        Driver* selectedDriver = nullptr;
+        for (auto& user : users) {
+            if (auto driver = dynamic_cast<Driver*>(user.get())) {
+                if (driver->isAvailable()) {
+                    selectedDriver = driver;
+                    break;
+                }
+            }
+        }
+        if (!selectedDriver) return {nullptr, nullptr};
+
+        selectedVehicle->setAvailability(false);
+        selectedDriver->setAvailability(false);
+        selectedVehicle->assignDriver(selectedDriver->getUsername());
+        selectedDriver->assignVehicle(selectedVehicle->getId());
+
+        return {selectedVehicle, selectedDriver};
+    }
+
+    void createShipment(const std::string& origin, const std::string& destination,
+                        double weight, const std::vector<std::string>& items, const std::string& agentId) {
+        int distance = getDistance(origin, destination);
+        if (distance == -1) {
+            throw std::runtime_error("Invalid cities specified");
+        }
+
+        auto shipment = std::make_unique<Shipment>(origin, destination, weight, items);
+        auto [vehicle, driver] = assignVehicle(weight, distance);
+
+        if (!vehicle || !driver) {
+            throw std::runtime_error("No available vehicle or driver");
+        }
+
+        auto [refills, fuelNeeded] = vehicle->calculateFuelNeeds(distance);
+        double estimatedTime = distance / 60.0;
+        estimatedTime += refills * 10.0 / 60.0;
+        estimatedTime += static_cast<int>(estimatedTime / 6) * 0.5;
+
+        shipment->assignVehicle(vehicle->getId());
+        shipment->assignDriver(driver->getUsername());
+        shipment->setFuelAndTime(fuelNeeded, estimatedTime);
+        shipment->saveToFile();
+
+        shipments.push_back(std::move(shipment));
+    }
+
+    void updateShipmentStatus(const std::string& shipmentId, const std::string& newStatus) {
+        auto it = std::find_if(shipments.begin(), shipments.end(),
+            [&](const auto& s) { return s->getId() == shipmentId; });
+
+        if (it != shipments.end()) {
+            (*it)->setStatus(newStatus);
+            (*it)->saveToFile();
+        }
+    }
+
+    void displayFleetStatus() const {
+        std::cout << "\n=== Current Fleet Status ===\n";
+        for (const auto& shipment : shipments) {
+            std::cout << "\nShipment ID: " << shipment->getId()
+                      << "\nRoute: " << shipment->getOrigin() << " → " << shipment->getDestination()
+                      << "\nStatus: ";
+            shipment->displayStatus();
+
+            if (shipment->getStatus() == "Delivered") {
+                std::cout << "Time taken: " << std::fixed << std::setprecision(2)
+                          << shipment->getTimeTaken() << " hours\n";
+                std::cout << "Fuel consumed: " << std::fixed << std::setprecision(2)
+                          << shipment->getFuelConsumed() << " liters\n";
+            }
+            std::cout << "------------------------\n";
+        }
+    }
+};
+
+// Main function
+int main() {
+    FleetManager fleetManager;
+    User* currentUser = nullptr;
+
+    while (true) {
+        if (!currentUser) {
+            std::cout << "\n=== Fleet Management System ===\n";
+            std::cout << "1. Login\n2. Register\n3. Exit\nChoice: ";
+            int choice;
+            std::cin >> choice;
+
+            if (choice == 1) {
+                std::string username, password;
+                std::cout << "Username: ";
+                std::cin >> username;
+                std::cout << "Password: ";
+                std::cin >> password;
+
+                currentUser = fleetManager.login(username, password);
+                if (!currentUser) {
+                    std::cout << "❌ Login failed!\n";
+                } else {
+                    std::cout << "✅ Login successful! Welcome, " << username << "!\n";
+                }
+            }
+            else if (choice == 2) {
+                std::string username, password, role;
+                std::cout << "Username: ";
+                std::cin >> username;
+                std::cout << "Password: ";
+                std::cin >> password;
+                std::cout << "Role (agent/driver): ";
+                std::cin >> role;
+
+                if (fleetManager.registerUser(username, password, role)) {
+                    std::cout << "✅ Registration successful!\n";
+                } else {
+                    std::cout << "❌ Registration failed! Username might already exist.\n";
+                }
+            }
+            else if (choice == 3) {
+                std::cout << "👋 Goodbye!\n";
+                break;
+            }
+        }
+        else {
+            if (currentUser->getRole() == "agent") {
+                std::cout << "\n=== Delivery Agent Menu ===\n";
+                std::cout << "1. Create New Shipment\n2. View Shipment Status\n3. Logout\nChoice: ";
+                int choice;
+                std::cin >> choice;
+
+                if (choice == 1) {
+                    try {
+                        auto cities = fleetManager.getCityList();
+                        std::cout << "\nAvailable Cities:\n";
+                        for (size_t i = 0; i < cities.size(); ++i) {
+                            std::cout << i + 1 << ". " << cities[i] << "\n";
+                        }
+
+                        int originIdx, destIdx;
+                        std::cout << "Select origin city (number): ";
+                        std::cin >> originIdx;
+                        std::cout << "Select destination city (number): ";
+                        std::cin >> destIdx;
+
+                        if (originIdx < 1 || originIdx > cities.size() ||
+                            destIdx < 1 || destIdx > cities.size() || originIdx == destIdx) {
+                            std::cout << "❌ Invalid city selection. Please select different cities.\n";
+                            continue;
+                        }
+
+                        std::string originCity = toLowerCase(cities[originIdx - 1]);
+                        std::string destinationCity = toLowerCase(cities[destIdx - 1]);
+
+                        std::cout << "Enter number of items: ";
+                        int numItems;
+                        std::cin >> numItems;
+
+                        std::vector<std::string> itemTypes;
+                        double totalWeight = 0;
+                        for (int i = 0; i < numItems; ++i) {
+                            std::string itemType;
+                            std::cout << "Item " << i + 1 << " type: ";
+                            std::cin >> itemType;
+                            itemTypes.push_back(itemType);
+
+                            double weight;
+                            std::cout << "Item " << i + 1 << " weight (kg): ";
+                            std::cin >> weight;
+                            totalWeight += weight;
+                        }
+
+                        fleetManager.createShipment(originCity, destinationCity, totalWeight, itemTypes, currentUser->getUsername());
+                        std::cout << "✅ Shipment created successfully!\n";
+                    }
+                    catch (const std::exception& e) {
+                        std::cout << "❌ Error: " << e.what() << "\n";
+                    }
+                }
+                else if (choice == 2) {
+                    fleetManager.displayFleetStatus();
+                }
+                else if (choice == 3) {
+                    currentUser = nullptr;
+                    std::cout << "👋 Logged out successfully!\n";
+                }
+            }
+            else if (currentUser->getRole() == "driver") {
+                std::cout << "\n=== Driver Menu ===\n";
+                std::cout << "1. Update Shipment Status\n2. View Current Assignment\n3. Logout\nChoice: ";
+                int choice;
+                std::cin >> choice;
+
+                if (choice == 1) {
+                    std::string shipmentId;
+                    std::cout << "Enter Shipment ID: ";
+                    std::cin >> shipmentId;
+
+                    std::cout << "Select new status:\n";
+                    std::cout << "1. Picked up\n2. In Transit\n3. Reached Hub\n4. Delivered\n";
+                    int statusChoice;
+                    std::cin >> statusChoice;
+
+                    std::string newStatus;
+                    switch (statusChoice) {
+                        case 1: newStatus = "Picked up"; break;
+                        case 2: newStatus = "In Transit"; break;
+                        case 3: newStatus = "Reached Hub"; break;
+                        case 4: newStatus = "Delivered"; break;
+                        default: std::cout << "Invalid choice!\n"; continue;
+                    }
+
+                    fleetManager.updateShipmentStatus(shipmentId, newStatus);
+                    std::cout << "✅ Status updated successfully!\n";
+                }
+                else if (choice == 2) {
+                    fleetManager.displayFleetStatus();
+                }
+                else if (choice == 3) {
+                    currentUser = nullptr;
+                    std::cout << "👋 Logged out successfully!\n";
+                }
+            }
+            else if (currentUser->getRole() == "admin") {
+                std::cout << "\n=== Admin Menu ===\n";
+                std::cout << "1. View Fleet Status\n2. View Login History\n3. View Shipment History\n4. Logout\nChoice: ";
+                int choice;
+                std::cin >> choice;
+
+                if (choice == 1) {
+                    fleetManager.displayFleetStatus();
+                }
+                else if (choice == 2) {
+                    std::cout << "\n=== Login History ===\n";
+                    auto history = FileOps::readLines("login_history.txt");
+                    for (const auto& line : history) {
+                        std::cout << line << "\n";
+                    }
+                }
+                else if (choice == 3) {
+                    std::cout << "\n=== Shipment History ===\n";
+                    auto history = FileOps::readLines("shipments.txt");
+                    for (const auto& line : history) {
+                        std::cout << line << "\n";
+                    }
+                }
+                else if (choice == 4) {
+                    currentUser = nullptr;
+                    std::cout << "👋 Logged out successfully!\n";
+                }
+            }
+        }
+    }
+    return 0;
+}
